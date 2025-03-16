@@ -34,7 +34,8 @@ from tqdm import tqdm
 
 
 # Asynchronous function to download a file from a URL
-async def download_file(url, path):
+# Returns -1 if failure, 0 if successful
+async def download_file(url, path) -> int:
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as resp:
             if resp.status == 200:
@@ -49,7 +50,7 @@ async def download_file(url, path):
                     # Create a tqdm progress bar
                     with tqdm(total=total_size, unit='B', unit_scale=True, desc=path, leave=True) as pbar:
                         while True:
-                            chunk = await resp.content.read(1048576)
+                            chunk = await resp.content.read(1024)
                             if not chunk:
                                 break
                             f.write(chunk)
@@ -57,6 +58,13 @@ async def download_file(url, path):
                             pbar.update(len(chunk))
             else:
                 print(f"Failed to download {url}: Status {resp.status}")
+                return -1
+    return 0
+
+# delete a file
+async def delete_file(seedr, file_id):
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, seedr.delete_file, file_id)
 
 
 # Process a single file: download and unzip if necessary
@@ -71,7 +79,10 @@ async def process_file(seedr, file_info):
         local_path = Path('.') / file_info["path"]
 
     local_path.parent.mkdir(parents=True, exist_ok=True)
-    await download_file(download_link, str(local_path))
+    result = await download_file(download_link, str(local_path))
+    if result == -1:
+        return
+    await delete_file(seedr, file_info["id"])
 
 # Recursively get all files from Seedr.cc
 async def get_all_files(seedr, folder_id="root", current_path=""):
