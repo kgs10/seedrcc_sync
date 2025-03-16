@@ -25,18 +25,17 @@ import asyncio
 import os
 from pathlib import Path
 
-
 from docopt import docopt
 import aiohttp
 from seedrapi.api import SeedrAPI
 from tqdm import tqdm
 
 
-
 # Asynchronous function to download a file from a URL
 # Returns -1 if failure, 0 if successful
 async def download_file(url, path) -> int:
-    async with aiohttp.ClientSession() as session:
+    # Create timeout for 5 hours due to possible slow connections and large files
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(3600*5)) as session:
         async with session.get(url) as resp:
             if resp.status == 200:
                 total_size = resp.headers.get('Content-Length')
@@ -64,6 +63,7 @@ async def download_file(url, path) -> int:
 # delete a file
 async def delete_file(seedr, file_id):
     loop = asyncio.get_event_loop()
+    # Currently a bug with the delete API https://github.com/AnjanaMadu/SeedrAPI/issues/9
     await loop.run_in_executor(None, seedr.delete_file, file_id)
 
 
@@ -103,8 +103,6 @@ async def get_all_files(seedr, folder_id="root", current_path=""):
 
 # Main async function
 async def main():
-    # Replace with your credentials
-
 
     seedr = SeedrAPI(os.environ.get('SEEDRCC_EMAIL'),
                      os.environ.get('SEEDRCC_PASSWORD'))
