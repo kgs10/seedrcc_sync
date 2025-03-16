@@ -1,0 +1,13 @@
+[project]
+name = "download-seedrcc"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "aiohttp>=3.11.13",
+    "docopt>=0.6.2",
+    "python-dotenv>=1.0.1",
+    "seedrapi>=1.0",
+    "tqdm>=4.67.1",
+]
