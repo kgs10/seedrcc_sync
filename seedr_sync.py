@@ -15,7 +15,8 @@ Description:
     is provided via --ouput, the files/folders will be downloaed there. If it's not
     provided, the working directory is used.
     
-    The below environment variables are used for seedr.cc connection:
+    The below environment variables are used for seedr.cc connection. A .env file can be used
+    to load them in, or they can be set before the script is ran:
         SEEDR_CC_EMAIL
         SEEDR_CC_PASSWORD
 """
