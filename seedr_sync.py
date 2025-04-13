@@ -20,100 +20,179 @@ Description:
         SEEDR_CC_EMAIL
         SEEDR_CC_PASSWORD
 """
-from dotenv import load_dotenv
 import asyncio
-import os
 from pathlib import Path
+import os
+from dataclasses import dataclass
 
-from docopt import docopt
 import aiohttp
-from seedrapi.api import SeedrAPI
 from tqdm import tqdm
+from dotenv import load_dotenv
+from docopt import docopt
+from aioseedrcc import (
+    Login,
+    Seedr
+)
 
+@dataclass
+class File:
+    """Class to track and interact with a seedr file"""
+    api: Seedr
+    name: str
+    path: Path
+    id: int
 
-# Asynchronous function to download a file from a URL
-# Returns -1 if failure, 0 if successful
-async def download_file(url, path) -> int:
-    # Create timeout for 5 hours due to possible slow connections and large files
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(3600*5)) as session:
-        async with session.get(url) as resp:
-            if resp.status == 200:
-                total_size = resp.headers.get('Content-Length')
-                if total_size is not None:
-                    total_size = int(total_size)
+    def __repr__(self) -> str:
+        return (f"{self.__class__.__name__}(api={self.api.__class__.__name__}, name={self.name}, "
+                +f"path={self.path}, id={self.id})")
+
+    def __str__(self) -> str:
+        return self.__repr__()
+
+    async def delete(self) -> None:
+        """
+        Delete the file in seedr
+        """
+        print(f"Deleting seedr file: {self.name}")
+        await self.api.delete_item(self.id, 'file')
+
+    async def download(self, location: Path) -> None:
+        """
+        Download the file to a location
+
+        Args:
+            location [Path]: System path to download the file to
+        """
+        details = await self.file_details()
+        url = details['url']
+
+        # Create timeout for 5 hours due to possible slow connections and large files
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(3600*5)) as session:
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    total_size = resp.headers.get('Content-Length')
+                    if total_size is not None:
+                        total_size = int(total_size)
+                    else:
+                        total_size = None
+
+                    # Open the file for writing
+                    with open(location, "wb") as f:
+                        with tqdm(total=total_size, unit='B', unit_scale=True, desc=str(location), leave=True) as pbar:
+                            while True:
+                                chunk = await resp.content.read(1024)
+                                if not chunk:
+                                    break
+                                f.write(chunk)
+                                # Update the progress bar by the size of the chunk
+                                pbar.update(len(chunk))
                 else:
-                    total_size = None
-                
-                # Open the file for writing
-                with open(path, "wb") as f:
-                    # Create a tqdm progress bar
-                    with tqdm(total=total_size, unit='B', unit_scale=True, desc=path, leave=True) as pbar:
-                        while True:
-                            chunk = await resp.content.read(1024)
-                            if not chunk:
-                                break
-                            f.write(chunk)
-                            # Update the progress bar by the size of the chunk
-                            pbar.update(len(chunk))
-            else:
-                print(f"Failed to download {url}: Status {resp.status}")
-                return -1
-    return 0
+                    print(f"Failed to download {url}: Status {resp.status}")
+                    self._download_was_successful = False
+                    return
+        self._download_was_successful = True
 
-# delete a file
-async def delete_file(seedr, file_id):
-    loop = asyncio.get_event_loop()
-    # Currently a bug with the delete API https://github.com/AnjanaMadu/SeedrAPI/issues/9
-    await loop.run_in_executor(None, seedr.delete_file, file_id)
+    async def file_details(self) -> dict:
+        """
+        Request file details such as download link from seedr
+        """
+        if hasattr(self, '_file_details'):
+            return self._file_details
+        return await self.api.fetch_file(self.id)
+
+    def get_was_download_successful(self) -> bool:
+        """
+        Return whether or not the download was successful
+
+        Return: bool if known. None if unknown (file download wasn't attempted)
+        """
+        if not hasattr(self, '_download_was_successful'):
+            return None
+        return self._download_was_successful
 
 
-# Process a single file: download and unzip if necessary
-async def process_file(seedr, file_info):
-    loop = asyncio.get_event_loop()
-    # Get file details synchronously in a thread
-    file_details = await loop.run_in_executor(None, seedr.get_file, file_info["id"])
-    download_link = file_details["url"]  # Assumes API returns a dict with "url"
-    if args['--output']:
-        local_path = Path(args['--output']) / file_info["path"]
-    else:
-        local_path = Path('.') / file_info["path"]
+async def get_all_files(seedr: Seedr, folder_id: str | int ="root", current_path: Path = None) -> list[File]:
+    """
+    Recursively get all files from
 
-    local_path.parent.mkdir(parents=True, exist_ok=True)
-    result = await download_file(download_link, str(local_path))
-    if result == -1:
-        return
-    await delete_file(seedr, file_info["id"])
+    Args:
+        seedr: Seedr API sdk
+        folder_id [int | str]: Folder ID to request contents of
+        current_path [Path | None]: Current seedr path for the folder
 
-# Recursively get all files from Seedr.cc
-async def get_all_files(seedr, folder_id="root", current_path=""):
-    loop = asyncio.get_event_loop()
-    # Get folder contents synchronously in a thread
-    folder = await loop.run_in_executor(None, seedr.get_folder, folder_id)
+    Returns list[File]
+    """
+    if not current_path:
+        current_path = Path()
     files = []
-    # Process files in the current folder
-    for item in folder["files"]:
-        file_path = os.path.join(current_path, item["name"])
-        files.append({"path": file_path, "id": item["folder_file_id"], "name": item["name"]})
+    folder = await seedr.list_contents(folder_id=folder_id)
+    for item in folder['files']:
+        file_path = current_path.joinpath(item["name"])
+        files.append(File(seedr,
+                          name=item['name'],
+                          path=file_path,
+                          id=int(item["folder_file_id"])))
 
-    for subfolder in folder["folders"]:
-        subfolder_path = os.path.join(current_path, subfolder["name"])
-        subfiles = await get_all_files(seedr, subfolder["id"], subfolder_path)
+    for subfolder in folder['folders']:
+        subfolder_path = current_path.joinpath(subfolder['name'])
+        subfiles = await get_all_files(seedr, subfolder['id'], subfolder_path)
         files.extend(subfiles)
     return files
 
-# Main async function
+async def process_file(file_info: File):
+    """
+    Process a single file
+    """
+    if path := args['--output']:
+        local_path = Path(path) / file_info.path
+    else:
+        local_path = Path('.') / file_info.path
+
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    await file_info.download(local_path)
+
+async def delete_successful_file(file_info: File) -> None:
+    """
+    Delete the file only if it was successfully downloaded
+
+    Arg:
+        file_info [File]
+    """
+    if file_info.get_was_download_successful():
+        await file_info.delete()
+
+async def is_folder_empty(seedr: Seedr, folder_id: int| str) -> bool:
+    """
+    Check whether a folder is empty
+    """
+    r = await seedr.list_contents(folder_id)
+    return len(r['files']) == 0 and len(r['folders']) == 0
+
+async def delete_empty_folders(seedr: Seedr) -> None:
+    """
+    Delete empty folders in Seedr
+    """
+    folders = await seedr.list_contents('root')
+    for folder in folders['folders']:
+        if not await is_folder_empty(seedr, folder['id']):
+            continue
+        print(f"Deleting folder: {folder['name']}")
+        await seedr.delete_item(folder['id'], 'folder')
+
+
 async def main():
-
-    seedr = SeedrAPI(os.environ.get('SEEDRCC_EMAIL'),
-                     os.environ.get('SEEDRCC_PASSWORD'))
-
-    print("Retrieving file list from Seedr.cc...")
-    all_files = await get_all_files(seedr)
-
-    tasks = [process_file(seedr, file_info) for file_info in all_files]
-    print(f"Starting download and processing of {len(tasks)} files...")
-    await asyncio.gather(*tasks)
-    print("All files have been downloaded and processed.")
+    async with Login(os.environ.get('SEEDRCC_EMAIL'), os.environ.get('SEEDRCC_PASSWORD')) as login:
+        await login.authorize()
+        async with Seedr(token=login.token, token_refresh_callback=login.authorize) as seedr:
+            print("Retrieving file list from Seedr.cc...")
+            files = await get_all_files(seedr)
+            tasks = [process_file(file_info) for file_info in files]
+            print(f"Starting download and processing of {len(tasks)} files...")
+            await asyncio.gather(*tasks)
+            print("Deleting successfully downloaded files...")
+            tasks = [delete_successful_file(file_info) for file_info in files]
+            await asyncio.gather(*tasks)
+            await delete_empty_folders(seedr)
 
 if __name__ == "__main__":
     args = docopt(__doc__)

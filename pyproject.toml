@@ -6,8 +6,11 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "aiohttp>=3.11.13",
+    "aioseedrcc>=0.3.2",
     "docopt>=0.6.2",
+    "ipython>=9.0.2",
     "python-dotenv>=1.0.1",
+    "seedr>=1.2.3",
     "seedrapi>=1.0",
     "tqdm>=4.67.1",
 ]
