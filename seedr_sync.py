@@ -14,7 +14,7 @@ Description:
     This script connects to Seedr.cc and performs file downloads. If an output location
     is provided via --ouput, the files/folders will be downloaed there. If it's not
     provided, the working directory is used.
-    
+
     The below environment variables are used for seedr.cc connection. A .env file can be used
     to load them in, or they can be set before the script is ran:
         SEEDR_CC_EMAIL
@@ -168,14 +168,14 @@ async def is_folder_empty(seedr: Seedr, folder_id: int| str) -> bool:
     r = await seedr.list_contents(folder_id)
     return len(r['files']) == 0 and len(r['folders']) == 0
 
-async def delete_empty_folders(seedr: Seedr) -> None:
+async def delete_empty_folders(seedr: Seedr, folder_id: int | str = 'root') -> None:
     """
     Delete empty folders in Seedr
     """
-    folders = await seedr.list_contents('root')
+    folders = await seedr.list_contents(folder_id)
     for folder in folders['folders']:
         if not await is_folder_empty(seedr, folder['id']):
-            continue
+            await delete_empty_folders(seedr, folder['id'])
         print(f"Deleting folder: {folder['name']}")
         await seedr.delete_item(folder['id'], 'folder')
 
