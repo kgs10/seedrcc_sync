@@ -49,12 +49,17 @@ class File:
     def __str__(self) -> str:
         return self.__repr__()
 
-    async def delete(self) -> None:
+    async def delete(self, retry: int = 3) -> None:
         """
         Delete the file in seedr
         """
         print(f"Deleting seedr file: {self.name}")
-        await self.api.delete_item(self.id, 'file')
+        while retry:
+            try:
+                return await self.api.delete_item(self.id, 'file')
+            except Exception as e:
+                retry -= 1
+        print(f"Failed to delete file '{self.name}' because of error {e}")
 
     async def download(self, location: Path) -> None:
         """
