@@ -181,6 +181,7 @@ async def delete_empty_folders(seedr: Seedr, folder_id: int | str = 'root') -> N
     for folder in folders['folders']:
         if not await is_folder_empty(seedr, folder['id']):
             await delete_empty_folders(seedr, folder['id'])
+            continue
         print(f"Deleting folder: {folder['name']}")
         await seedr.delete_item(folder['id'], 'folder')
 
