@@ -34,6 +34,8 @@ from aioseedrcc import (
     Seedr
 )
 
+SEMAPHORE_COUNT = 10  # Limit concurrent downloads to 10
+
 @dataclass
 class File:
     """Class to track and interact with a seedr file"""
@@ -144,7 +146,7 @@ async def get_all_files(seedr: Seedr, folder_id: str | int ="root", current_path
         files.extend(subfiles)
     return files
 
-async def process_file(file_info: File):
+async def process_file(file_info: File, lock: asyncio.Semaphore) -> None:
     """
     Process a single file
     """
@@ -154,9 +156,10 @@ async def process_file(file_info: File):
         local_path = Path('.') / file_info.path
 
     local_path.parent.mkdir(parents=True, exist_ok=True)
-    await file_info.download(local_path)
+    async with lock:
+        await file_info.download(local_path)
 
-async def delete_successful_file(file_info: File) -> None:
+async def delete_successful_file(file_info: File, lock: asyncio.Semaphore) -> None:
     """
     Delete the file only if it was successfully downloaded
 
@@ -164,7 +167,8 @@ async def delete_successful_file(file_info: File) -> None:
         file_info [File]
     """
     if file_info.get_was_download_successful():
-        await file_info.delete()
+        async with lock:
+            await file_info.delete()
 
 async def is_folder_empty(seedr: Seedr, folder_id: int| str) -> bool:
     """
@@ -189,14 +193,15 @@ async def delete_empty_folders(seedr: Seedr, folder_id: int | str = 'root') -> N
 async def main():
     async with Login(os.environ.get('SEEDRCC_EMAIL'), os.environ.get('SEEDRCC_PASSWORD')) as login:
         await login.authorize()
+        semaphore = asyncio.Semaphore(SEMAPHORE_COUNT)
         async with Seedr(token=login.token, token_refresh_callback=login.authorize) as seedr:
             print("Retrieving file list from Seedr.cc...")
             files = await get_all_files(seedr)
-            tasks = [process_file(file_info) for file_info in files]
+            tasks = [process_file(file_info, semaphore) for file_info in files]
             print(f"Starting download and processing of {len(tasks)} files...")
             await asyncio.gather(*tasks)
             print("Deleting successfully downloaded files...")
-            tasks = [delete_successful_file(file_info) for file_info in files]
+            tasks = [delete_successful_file(file_info, semaphore) for file_info in files]
             await asyncio.gather(*tasks)
             await delete_empty_folders(seedr)
 
